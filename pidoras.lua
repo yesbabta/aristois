@@ -1,21 +1,19 @@
 -- ============================================================
--- NOBLACK HUB LITE v1.0
+-- NOBLACK HUB LITE v1.1 (XENO FIX)
 -- Stripped build: Fast Hits / Spam / Aim / KillAura / Magnet / Anim
 -- ============================================================
+
 -- ============================================================
--- XENO EXECUTOR COMPATIBILITY HEADER
+-- COMPAT HEADER (Xeno / Synapse / KRNL / Solara / Wave)
 -- ============================================================
 do
-    -- 1. Определяем исполнитель
     local EXEC_NAME = "unknown"
     pcall(function()
         if identifyexecutor then EXEC_NAME = tostring(identifyexecutor()) end
     end)
-    local IS_XENO = EXEC_NAME:lower():find("xeno") ~= nil
     getgenv().EXEC_NAME = EXEC_NAME
-    getgenv().IS_XENO  = IS_XENO
+    getgenv().IS_XENO  = tostring(EXEC_NAME):lower():find("xeno") ~= nil
 
-    -- 2. Универсальный HttpGet (Xeno / Synapse / KRNL / Solara / Wave)
     local function HttpGet(url)
         if game.HttpGet then
             local ok, r = pcall(function() return game:HttpGet(url) end)
@@ -33,17 +31,17 @@ do
             local ok, r = pcall(function() return httpget(url) end)
             if ok and type(r) == "string" and #r > 0 then return r end
         end
-        error("[noblack lite] HTTP GET failed: " .. tostring(url))
+        return nil
     end
     getgenv().HttpGet = HttpGet
 
-    -- 3. Fallback для Drawing API (если Xeno без Drawing)
+    -- Stub для Drawing, если его нет
     if not Drawing or not Drawing.new then
-        warn("[noblack lite] Drawing API не найден — визуал (FOV круг, Range Indicator) будет отключён")
+        warn("[noblack lite] Drawing API не найден — визуальные круги отключены")
         local stub = {}
         stub.new = function(t)
-            return setmetatable({ Type = t, Visible = false, __stub = true }, {
-                __index    = function(_, k) return rawget(stub, k) end,
+            return setmetatable({ Type = t, Visible = false, Position = Vector2.new(0,0), Radius = 0, Thickness = 0, Filled = false, Color = Color3.new(1,1,1), Transparency = 1, __stub = true }, {
+                __index    = function(self, k) return rawget(self, k) end,
                 __newindex = function() end,
             })
         end
@@ -51,25 +49,25 @@ do
         getgenv().Drawing = stub
     end
 
-    -- 4. Безопасный loadstring
     local LS = loadstring or load
     if not LS then
-        error("[noblack lite] loadstring недоступен — запусти скрипт в Xeno, а не в обычной консоли")
+        error("[noblack lite] loadstring недоступен. Запусти этот скрипт внутри executor (Xeno), а не в обычной среде.")
     end
     getgenv().SafeLoadstring = function(code, name)
         return LS(code, name or "=noblack_lite")
     end
 end
 -- ============================================================
--- END XENO COMPATIBILITY HEADER
+-- END COMPAT HEADER
 -- ============================================================
-local Players = game:GetService("Players")
-local UIS = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
-local RS = game:GetService("ReplicatedStorage")
-local Stats = game:GetService("Stats")
-local CoreGui = game:GetService("CoreGui")
+
+local Players      = game:GetService("Players")
+local UIS          = game:GetService("UserInputService")
+local RunService   = game:GetService("RunService")
+local Workspace    = game:GetService("Workspace")
+local RS           = game:GetService("ReplicatedStorage")
+local Stats        = game:GetService("Stats")
+local CoreGui      = game:GetService("CoreGui")
 
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera
@@ -114,16 +112,29 @@ task.spawn(function()
     end
 end)
 
--- Packet + FistRemote
-local Packet = require(RS:WaitForChild("Packet", 10))
-local FistRemote = Packet("FistRemote", "String", "Any", "Any", "Any", "Any", "Any")
-local PlayerSettings = Players:WaitForChild("PlayerSettings", 10)
+-- Packet + FistRemote (безопасно: не падаем, если модуля нет)
+local FistRemote = nil
+pcall(function()
+    local Packet = require(RS:WaitForChild("Packet", 10))
+    FistRemote = Packet("FistRemote", "String", "Any", "Any", "Any", "Any", "Any")
+end)
+if not FistRemote then
+    warn("[noblack lite] FistRemote не найден — Fast Hits / Spam / KillAura будут отключены")
+end
 
--- Collections (declared early for forward refs)
-local Magnets = {}
+local PlayerSettings = nil
+pcall(function() PlayerSettings = Players:WaitForChild("PlayerSettings", 10) end)
+
+local function fireFist(...)
+    if not FistRemote then return end
+    pcall(function() FistRemote:Fire(...) end)
+end
+
+-- Collections
+local Magnets    = {}
 local ESPObjects = {}
 
--- Limited themes / accents / fonts
+-- Themes / accents / fonts
 local THEMES = {"Dark", "Light", "Midnight", "Rose", "Crimson"}
 
 local ACCENTS = {
@@ -142,10 +153,9 @@ local ACCENTS = {
 local FONTS = {"Gotham","GothamBold","GothamBlack","SourceSans","Roboto","Code","Ubuntu","Arial"}
 
 -- ============================================================
--- SETTINGS (stripped)
+-- SETTINGS
 -- ============================================================
 local settings = {
-    -- Aim
     aimEnabled = false, hardLock = false, teamCheck = true,
     aimPart = "Head", currentBind = Enum.KeyCode.R,
     aimMode = "Toggle", alwaysOn = true,
@@ -153,31 +163,24 @@ local settings = {
     predictiveAim = false, predictiveTime = 0.15,
     toggleState = false, holdState = false, lockedTarget = nil,
 
-    -- Fast hits (max delay 300)
     fastHits = false, hitDelay = 100,
     fastHitEnabled = false, fastHitDelay = 300,
 
-    -- Spam
     hitESpam = false, hitESpamDelay = 400,
     hitQSpam = false, hitQSpamDelay = 400,
     hitLMBSpam = false, hitLMBSpamDelay = 400,
     hitFSpam = false, hitFSpamDelay = 400,
     mixedSpam = false, mixedSpamDelay = 400, mixedIdx = 1,
 
-    -- Kill aura
     killAura = false, killAuraRange = 20, killAuraDelay = 150,
     killAuraTeamCheck = true, killAuraAutoFace = true,
 
-    -- Magnet (size max 15, range max 50)
     magnet = false, showHitbox = true, magnetSize = 10, magnetRange = 25,
 
-    -- Anim (max 3)
     animSpeedEnabled = false, animSpeed = 1.5,
 
-    -- ESP
     espBoxes = false,
 
-    -- Misc
     autoEquip = true,
     soundOnToggle = true, notifications = true,
     currentTheme = "Dark", currentAccent = "Purple", currentFont = "Gotham",
@@ -187,20 +190,24 @@ local settings = {
 
 -- Drawing
 local circle = Drawing.new("Circle")
-circle.Visible = false
-circle.Radius = settings.radius
-circle.Thickness = 1.5
-circle.Filled = false
-circle.Color = Color3.fromRGB(255, 255, 255)
-circle.Transparency = 1
+pcall(function()
+    circle.Visible = false
+    circle.Radius = settings.radius
+    circle.Thickness = 1.5
+    circle.Filled = false
+    circle.Color = Color3.fromRGB(255, 255, 255)
+    circle.Transparency = 1
+end)
 
 local rangeCircle = Drawing.new("Circle")
-rangeCircle.Visible = false
-rangeCircle.Radius = 90
-rangeCircle.Thickness = 2
-rangeCircle.Filled = false
-rangeCircle.Color = Color3.fromRGB(255, 180, 60)
-rangeCircle.Transparency = 0.9
+pcall(function()
+    rangeCircle.Visible = false
+    rangeCircle.Radius = 90
+    rangeCircle.Thickness = 2
+    rangeCircle.Filled = false
+    rangeCircle.Color = Color3.fromRGB(255, 180, 60)
+    rangeCircle.Transparency = 0.9
+end)
 
 -- ============================================================
 -- HELPERS
@@ -264,27 +271,53 @@ local function snapAim(pos)
             aimPos = pos + part.AssemblyLinearVelocity * settings.predictiveTime
         end
     end
-    camera.CFrame = CFrame.lookAt(camera.CFrame.Position, aimPos)
+    pcall(function()
+        camera.CFrame = CFrame.lookAt(camera.CFrame.Position, aimPos)
+    end)
 end
 
 -- Sound
 local SOUND_ON = "rbxassetid://6042053626"
 local function playSound(pitch, vol)
     if not settings.soundOnToggle then return end
-    local s = Instance.new("Sound")
-    s.SoundId = SOUND_ON
-    s.Volume = vol or 0.15
-    s.PlaybackSpeed = (pitch and pitch / 300) or 1.2
-    s.PlayOnRemove = true
-    s.Parent = CoreGui
-    s:Play()
-    task.delay(1, function() s:Destroy() end)
+    pcall(function()
+        local s = Instance.new("Sound")
+        s.SoundId = SOUND_ON
+        s.Volume = vol or 0.15
+        s.PlaybackSpeed = (pitch and pitch / 300) or 1.2
+        s.PlayOnRemove = true
+        s.Parent = CoreGui
+        s:Play()
+        task.delay(1, function() s:Destroy() end)
+    end)
 end
 
 -- ============================================================
--- WINDUI
+-- WINDUI (с фолбэками)
 -- ============================================================
-local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+local WINDUI_URLS = {
+    "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua",
+    "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua",
+    "https://raw.githubusercontent.com/Footagesus/WindUI/main/main.lua",
+}
+
+local WindUI, WindUI_Source
+for _, u in ipairs(WINDUI_URLS) do
+    local src = HttpGet(u)
+    if src and #src > 0 then
+        local ok, mod = pcall(function() return SafeLoadstring(src, "=WindUI") end)
+        if ok and type(mod) == "table" then
+            WindUI = mod
+            WindUI_Source = u
+            break
+        end
+    end
+end
+
+if not WindUI then
+    warn("[noblack lite] Не удалось загрузить WindUI. Проверь интернет / отключи VPN. Скрипт остановлен.")
+    return
+end
 
 pcall(function()
     WindUI:AddTheme({
@@ -397,10 +430,10 @@ AimTab:Dropdown({ Title = "Mode", Values = {"Toggle","Hold"}, Value = "Toggle",
 local VisualsTab = Window:Tab({ Title = "Visuals", Icon = "eye" })
 VisualsTab:Section({ Title = "Aim Visuals", Opened = true })
 VisualsTab:Slider({ Title = "FOV Radius", Step = 1, Value = { Min = 30, Max = 500, Default = 200 },
-    Callback = function(v) settings.radius = v; circle.Radius = v end })
+    Callback = function(v) settings.radius = v; pcall(function() circle.Radius = v end) end })
 VisualsTab:Toggle({ Title = "Range Indicator", Value = false, Callback = function(v)
     settings.rangeIndicator = v
-    rangeCircle.Visible = v
+    pcall(function() rangeCircle.Visible = v end)
 end })
 VisualsTab:Section({ Title = "ESP" })
 VisualsTab:Toggle({ Title = "ESP 3D Boxes", Value = false, Callback = function(v) settings.espBoxes = v end })
@@ -416,7 +449,7 @@ FightTab:Button({ Title = "Quick Hit x20", Callback = function()
     for i = 1, 20 do
         local char = player.Character
         if char and char:FindFirstChild("Fists") and player:GetAttribute("canAttack") ~= false then
-            pcall(function() FistRemote:Fire("lmb") end)
+            fireFist("lmb")
         end
         task.wait(0.005)
     end
@@ -469,7 +502,7 @@ KATab:Slider({ Title = "Range (studs)", Step = 1, Value = { Min = 5, Max = 100, 
 KATab:Toggle({ Title = "Team Check", Value = true, Callback = function(v) settings.killAuraTeamCheck = v end })
 KATab:Toggle({ Title = "Auto-Face Target", Value = true, Callback = function(v) settings.killAuraAutoFace = v end })
 
--- MAGNET (limited)
+-- MAGNET
 local MagTab = Window:Tab({ Title = "Magnet", Icon = "magnet" })
 MagTab:Section({ Title = "Head Magnet", Opened = true })
 MagTab:Toggle({ Title = "Magnet (Head Hitbox)", Value = false, Callback = function(v)
@@ -492,7 +525,7 @@ MagTab:Slider({ Title = "Magnet Size", Step = 1, Value = { Min = 2, Max = 15, De
 MagTab:Slider({ Title = "Magnet Range", Step = 1, Value = { Min = 5, Max = 50, Default = 25 },
     Callback = function(v) settings.magnetRange = v end })
 
--- ANIM SPEED (limited)
+-- ANIM SPEED
 local AnimTab = Window:Tab({ Title = "Anim Speed", Icon = "fast-forward" })
 AnimTab:Section({ Title = "Animation Speed", Opened = true })
 AnimTab:Toggle({ Title = "Anim Speed", Value = false, Callback = function(v)
@@ -509,7 +542,7 @@ end })
 AnimTab:Slider({ Title = "Anim Speed (x)", Step = 0.1, Value = { Min = 0.5, Max = 3, Default = 1.5 },
     Callback = function(v) settings.animSpeed = v end })
 
--- THEME (limited)
+-- THEME
 local ThemeTab = Window:Tab({ Title = "Theme", Icon = "palette" })
 ThemeTab:Section({ Title = "Theme", Opened = true })
 local accentNames = {}
@@ -569,7 +602,7 @@ ExtrasTab:Section({ Title = "Options", Opened = true })
 ExtrasTab:Toggle({ Title = "Sound on Toggle", Value = true, Callback = function(v) settings.soundOnToggle = v end })
 ExtrasTab:Toggle({ Title = "Notifications", Value = true, Callback = function(v) settings.notifications = v end })
 ExtrasTab:Section({ Title = "Info" })
-ExtrasTab:Paragraph({ Title = "noblack hub LITE v1.0", Content = "Lightweight — fast hits, spam, magnet, anim" })
+ExtrasTab:Paragraph({ Title = "noblack hub LITE v1.1", Content = "Xeno-fix — fast hits, spam, magnet, anim" })
 
 -- ============================================================
 -- LOGIC
@@ -590,7 +623,7 @@ local function equipFistsOnce()
     end
 end
 player.CharacterAdded:Connect(equipFistsOnce)
-if player.Character then equipFistsOnce() end
+if player.Character then task.spawn(equipFistsOnce) end
 
 -- Fast hits
 task.spawn(function()
@@ -598,7 +631,7 @@ task.spawn(function()
         if settings.fastHits then
             local char = player.Character
             if char and char:FindFirstChild("Fists") and player:GetAttribute("canAttack") ~= false then
-                pcall(function() FistRemote:Fire("lmb") end)
+                fireFist("lmb")
             end
             task.wait(settings.hitDelay / 1000)
         else
@@ -613,7 +646,7 @@ task.spawn(function()
         if settings.fastHitEnabled then
             local char = player.Character
             if char and char:FindFirstChild("Fists") and player:GetAttribute("canAttack") ~= false then
-                pcall(function() FistRemote:Fire("lmb") end)
+                fireFist("lmb")
             end
             task.wait(settings.fastHitDelay / 1000)
         else
@@ -629,24 +662,24 @@ task.spawn(function()
         elseif settings.killAura then
             task.wait(0.01)
         elseif settings.hitESpam then
-            pcall(function() FistRemote:Fire("keypress", "e") end)
+            fireFist("keypress", "e")
             task.wait(settings.hitESpamDelay / 1000)
         elseif settings.hitQSpam then
-            pcall(function() FistRemote:Fire("keypress", "q") end)
+            fireFist("keypress", "q")
             task.wait(settings.hitQSpamDelay / 1000)
         elseif settings.hitLMBSpam then
-            pcall(function() FistRemote:Fire("lmb") end)
+            fireFist("lmb")
             task.wait(settings.hitLMBSpamDelay / 1000)
         elseif settings.hitFSpam then
-            pcall(function() FistRemote:Fire("keypress", "f") end)
+            fireFist("keypress", "f")
             task.wait(settings.hitFSpamDelay / 1000)
         elseif settings.mixedSpam then
             local modes = {"lmb", "q", "e"}
             local mode = modes[settings.mixedIdx or 1]
             if mode == "lmb" then
-                pcall(function() FistRemote:Fire("lmb") end)
+                fireFist("lmb")
             else
-                pcall(function() FistRemote:Fire("keypress", mode) end)
+                fireFist("keypress", mode)
             end
             settings.mixedIdx = ((settings.mixedIdx or 1) % 3) + 1
             task.wait(settings.mixedSpamDelay / 1000)
@@ -684,7 +717,7 @@ task.spawn(function()
                         end)
                     end
                     if myChar:FindFirstChild("Fists") then
-                        pcall(function() FistRemote:Fire("lmb") end)
+                        fireFist("lmb")
                     else
                         local bp = player:FindFirstChild("Backpack")
                         local tool = bp and bp:FindFirstChild("Fists")
@@ -878,25 +911,27 @@ end)
 -- Range indicator
 RunService.RenderStepped:Connect(function()
     if not settings.rangeIndicator then
-        rangeCircle.Visible = false
+        pcall(function() rangeCircle.Visible = false end)
         return
     end
     local myRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     if not myRoot then
-        rangeCircle.Visible = false
+        pcall(function() rangeCircle.Visible = false end)
         return
     end
     local sp, onScreen = camera:WorldToViewportPoint(myRoot.Position)
     if not onScreen then
-        rangeCircle.Visible = false
+        pcall(function() rangeCircle.Visible = false end)
         return
     end
     local baseDist = 8
     local p1, _ = camera:WorldToViewportPoint(myRoot.Position + Vector3.new(baseDist, 0, 0))
     local p2, _ = camera:WorldToViewportPoint(myRoot.Position)
-    rangeCircle.Radius = math.abs(p1.X - p2.X)
-    rangeCircle.Position = Vector2.new(sp.X, sp.Y)
-    rangeCircle.Visible = true
+    pcall(function()
+        rangeCircle.Radius = math.abs(p1.X - p2.X)
+        rangeCircle.Position = Vector2.new(sp.X, sp.Y)
+        rangeCircle.Visible = true
+    end)
 end)
 
 -- Aim bind handler
@@ -924,11 +959,11 @@ UIS.InputEnded:Connect(function(input)
     end
 end)
 
--- Cleanup on remove
+-- Cleanup
 player.CharacterRemoving:Connect(function()
     for p in pairs(Magnets) do removeMagnetFor(p) end
 end)
 
 task.delay(0.5, function()
-    toast("noblack hub LITE loaded")
+    toast("noblack hub LITE loaded (" .. tostring(getgenv().EXEC_NAME) .. ")")
 end)
