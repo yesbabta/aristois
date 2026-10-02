@@ -2,6 +2,67 @@
 -- NOBLACK HUB LITE v1.0
 -- Stripped build: Fast Hits / Spam / Aim / KillAura / Magnet / Anim
 -- ============================================================
+-- ============================================================
+-- XENO EXECUTOR COMPATIBILITY HEADER
+-- ============================================================
+do
+    -- 1. Определяем исполнитель
+    local EXEC_NAME = "unknown"
+    pcall(function()
+        if identifyexecutor then EXEC_NAME = tostring(identifyexecutor()) end
+    end)
+    local IS_XENO = EXEC_NAME:lower():find("xeno") ~= nil
+    getgenv().EXEC_NAME = EXEC_NAME
+    getgenv().IS_XENO  = IS_XENO
+
+    -- 2. Универсальный HttpGet (Xeno / Synapse / KRNL / Solara / Wave)
+    local function HttpGet(url)
+        if game.HttpGet then
+            local ok, r = pcall(function() return game:HttpGet(url) end)
+            if ok and type(r) == "string" and #r > 0 then return r end
+        end
+        if request then
+            local ok, r = pcall(function() return request({ Url = url, Method = "GET" }).Body end)
+            if ok and type(r) == "string" and #r > 0 then return r end
+        end
+        if syn and syn.request then
+            local ok, r = pcall(function() return syn.request({ Url = url, Method = "GET" }).Body end)
+            if ok and type(r) == "string" and #r > 0 then return r end
+        end
+        if httpget then
+            local ok, r = pcall(function() return httpget(url) end)
+            if ok and type(r) == "string" and #r > 0 then return r end
+        end
+        error("[noblack lite] HTTP GET failed: " .. tostring(url))
+    end
+    getgenv().HttpGet = HttpGet
+
+    -- 3. Fallback для Drawing API (если Xeno без Drawing)
+    if not Drawing or not Drawing.new then
+        warn("[noblack lite] Drawing API не найден — визуал (FOV круг, Range Indicator) будет отключён")
+        local stub = {}
+        stub.new = function(t)
+            return setmetatable({ Type = t, Visible = false, __stub = true }, {
+                __index    = function(_, k) return rawget(stub, k) end,
+                __newindex = function() end,
+            })
+        end
+        stub.clear = function() end
+        getgenv().Drawing = stub
+    end
+
+    -- 4. Безопасный loadstring
+    local LS = loadstring or load
+    if not LS then
+        error("[noblack lite] loadstring недоступен — запусти скрипт в Xeno, а не в обычной консоли")
+    end
+    getgenv().SafeLoadstring = function(code, name)
+        return LS(code, name or "=noblack_lite")
+    end
+end
+-- ============================================================
+-- END XENO COMPATIBILITY HEADER
+-- ============================================================
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
